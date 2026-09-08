@@ -10,21 +10,18 @@ import {
   md5Uint8Array,
 } from '@webrcade/app-common';
 
-import { getCompatibilityMessage, STARCRAFT_64_MD5S } from './compat';
+import { getCompatibilityMessage, getGameSettings } from './compat';
 
-// 1080 Snowboarding doesn't render correctly under the WebGL2/GLES3 build -
-// force the GLES2 fallback for it by MD5, same pattern as StarCraft 64.
-// getScriptUrl() normally runs before the ROM (and its MD5) is available
-// (app-common's retro/index.js:280 calls loadEmscriptenModule() before the
-// ROM is fetched), so loadEmscriptenModule()/setRoms() are overridden below
-// to defer the actual module load until setRoms() has the MD5 in hand -
-// entirely within this app, no app-common changes.
-const NO_WEBGL2_MD5S = [
-  '632c98cf281cda776e66685b278a4fa6', // 1080 Snowboarding (Europe)
-  'f58b3055a2c642fb2f563f11b6b597ea', // 1080 Snowboarding (Europe)
-  'fa27089c425dbab99f19245c5c997613', // 1080 Snowboarding (Japan, USA)
-  '18381c8f37e2b29f5940eea9b5f96814', // 1080 Snowboarding (Japan, USA)
-];
+// getScriptUrl()/onWriteAdditionalFiles() consult compat.js's per-title
+// GAME_SETTINGS table (useGles2, nativeResFactor, fbEmulation, etc.) - add
+// a new per-game tweak there, not a new one-off MD5 list/const here.
+//
+// getScriptUrl() needs the ROM's MD5 (for useGles2 below), but it normally
+// runs before the ROM is fetched (app-common's retro/index.js:280 calls
+// loadEmscriptenModule() before the ROM is fetched), so
+// loadEmscriptenModule()/setRoms() are overridden below to defer the
+// actual module load until setRoms() has the MD5 in hand - entirely
+// within this app, no app-common changes.
 
 const UP = 0x0001;
 const DOWN = 0x0002;
@@ -163,8 +160,7 @@ export class Emulator extends RetroAppWrapper {
   }
 
   getScriptUrl() {
-    const props = this.getProps();
-    return props.disableOpenGL2 === true || NO_WEBGL2_MD5S.includes(this._romMd5)
+    return getGameSettings(this._romMd5).useGles2 === true
       ? 'js/mupen64plus_next_libretro_gles2.js'
       : 'js/mupen64plus_next_libretro.js';
   }
@@ -185,17 +181,18 @@ export class Emulator extends RetroAppWrapper {
 
   // GLideN64 needs a real GL context, and we don't have real pthreads in
   // this WASM build, so keep the renderer single-threaded.
+  // WRC - audio_latency intentionally not set here for now (was tuned
+  // per-game via the editor's old disableOpenGL2/audioLatency props,
+  // now removed - see compat.js). Testing from a clean slate (core's own
+  // default) to see whether tuning it was ever actually necessary before
+  // reintroducing it, here or in compat.js's GAME_SETTINGS.
   getRaConfigContents() {
-    // 0=Low/128, 1=Medium/256, 2=High/512.
-    const AUDIO_LATENCIES = [128, 256, 512];
-    const audioLatency = AUDIO_LATENCIES[parseInt(this.getProps().audioLatency, 10)] || AUDIO_LATENCIES[0];
-
     return (
       // "video_threaded = \"true\"\n" +
       "video_vsync = \"false\"\n" +
       // "video_driver = \"gl\"\n" +
       // "video_driver = \"null\"\n" +
-      `audio_latency = "${audioLatency}"\n` +
+      "audio_latency = \"256\"\n" +
       "audio_buffer_size = \"16384\"\n"
       // "audio_sync = \"false\"\n"
       // "audio_driver = \"rwebaudio\"\n"
@@ -224,18 +221,15 @@ export class Emulator extends RetroAppWrapper {
 
     const { FS } = window;
 
+    // See compat.js's GAME_SETTINGS table for what each of these keys does
+    // and why a given title needs it - add a new per-game tweak there, not
+    // a new one-off MD5 check/const here.
+    const gameSettings = getGameSettings(this._romMd5);
+
     // 0 (disabled) means "no explicit value" - the core falls back to its
     // own per-game database (or 2 if the game isn't in it), so the option
     // is simply left out of the file rather than writing a literal "0".
-    const countPerOp = parseInt(this.getProps().countPerOp, 10) || 0;
-
-    // StarCraft 64 renders corrupted with FB emulation on (unresolved -
-    // see project_starcraft64_corruption_investigation memory); disabling
-    // it trades that for a blank title/credits screen instead, which is an
-    // acceptable tradeoff for this title specifically. Scoped by MD5 rather
-    // than globally, since other games may depend on FB emulation for their
-    // own effects.
-    const isStarCraft64 = STARCRAFT_64_MD5S.includes(this._romMd5);
+    const countPerOp = gameSettings.countPerOp || 0;
 
     const opt =
       'mupen64plus-rdp-plugin = "gliden64"\n' +
@@ -243,24 +237,13 @@ export class Emulator extends RetroAppWrapper {
       'mupen64plus-cpucore = "cached_interpreter"\n' +
       'mupen64plus-EnableCopyColorToRDRAM = "Off"\n' +
       'mupen64plus-EnableCopyDepthToRDRAM = "Off"\n' +
-      // 'mupen64plus-Framerate = "Fullspeed"\n' +
-      // 'mupen64plus-ThreadedRenderer = "True"\n' +
+      'mupen64plus-EnableFragmentDepthWrite = "True"\n' +
       'mupen64plus-next-EnableInaccurateTextureCoordinate = "True"\n' +
       'mupen64plus-next-EnableLegacyBlending = "True"\n' +
-      // 'mupen64plus-next-BilinearMode = "3point"\n' +
-      // 'mupen64plus-EnableTextureCache = "False"\n' +
-      (isStarCraft64 ? 'mupen64plus-EnableFBEmulation = "False"\n' : '') +
       'mupen64plus-HybridFilter = "False"\n' +
-      // 'mupen64plus-EnableNativeResFactor = "4"\n' +
-      (countPerOp >= 1 ? `mupen64plus-CountPerOp = "${countPerOp}"\n` : '') +
-
-      'mupen64plus-astick-deadzone = "15"\n' +
-      'mupen64plus-astick-sensitivity = "100"\n' +
-      'mupen64plus-pak1 = "memory"\n' +
-      'mupen64plus-pak2 = "none"\n' +
-      'mupen64plus-pak3 = "none"\n' +
-      'mupen64plus-pak4 = "none"\n';
-
+      (gameSettings.fbEmulation === false ? 'mupen64plus-EnableFBEmulation = "False"\n' : '') +
+      (gameSettings.nativeResFactor ? `mupen64plus-EnableNativeResFactor = "${gameSettings.nativeResFactor}"\n` : '') +
+      (countPerOp >= 1 ? `mupen64plus-CountPerOp = "${countPerOp}"\n` : '')
 
     try { FS.mkdir('/home/web_user/retroarch/userdata/config/Mupen64Plus-Next'); } catch (e) {}
     try {
