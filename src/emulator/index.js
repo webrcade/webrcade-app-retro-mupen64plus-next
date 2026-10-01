@@ -1,5 +1,5 @@
 import {
-  RetroAppWrapper,
+  BasicRetroAppWrapper,
   DisplayLoop,
   LOG,
   Controller,
@@ -67,23 +67,33 @@ class N64KeyCodeToControlMapping extends KeyCodeToControlMapping {
       [KCODES.Z]: CIDS.X, // B Button
       [KCODES.X]: CIDS.A, // A button
       [KCODES.SPACE_BAR]: CIDS.RTRIG, // Z button
-      [KCODES.W]: C_UP, // D-pad (up)
-      [KCODES.A]: C_LEFT, // D-pad (left)
-      [KCODES.S]: C_DOWN, // D-pad (down)
-      [KCODES.D]: C_RIGHT, // D-pad (right)
-      [KCODES.I]: CIDS.UP, // C-pad (up)
-      [KCODES.J]: CIDS.LEFT, // C-pad (left)
-      [KCODES.K]: CIDS.DOWN, // C-pad (down)
-      [KCODES.L]: CIDS.RIGHT, // C-pad (right)
+      [KCODES.W]: C_UP, // C button (up)
+      [KCODES.A]: C_LEFT, // C button (left)
+      [KCODES.S]: C_DOWN, // C button (down)
+      [KCODES.D]: C_RIGHT, // C button (right)
+      [KCODES.I]: CIDS.UP, // D-pad (up)
+      [KCODES.J]: CIDS.LEFT, // D-pad (left)
+      [KCODES.K]: CIDS.DOWN, // D-pad (down)
+      [KCODES.L]: CIDS.RIGHT, // D-pad (right)
       [KCODES.CONTROL_RIGHT]: ANALOG_50, // Analog 50%
       [KCODES.CONTROL_LEFT]: ANALOG_50, // Analog 50%
       [KCODES.SHIFT_RIGHT]: ANALOG_25, // Analog 25%
       [KCODES.SHIFT_LEFT]: ANALOG_25, // Analog 25%
     });
   }
+
+  // This app maps both Control keys to Analog 50% and both Shift keys to
+  // Analog 25% above -- real gameplay modifiers. The shared Ctrl+Shift
+  // pause sequence collides with holding both together, so it's disabled
+  // for this app only. The literal Escape key (still mapped above) and
+  // the gamepad pause combo (SL+X, LT+LA) are unaffected. Same fix as
+  // the standalone parallel-n64 app.
+  isEscapeKeySequenceEnabled() {
+    return false;
+  }
 }
 
-export class Emulator extends RetroAppWrapper {
+export class Emulator extends BasicRetroAppWrapper {
 
   GAME_SRAM_NAME = 'game.srm';
   SAVE_NAME = 'sav';
@@ -241,6 +251,13 @@ export class Emulator extends RetroAppWrapper {
       'mupen64plus-next-EnableInaccurateTextureCoordinate = "True"\n' +
       'mupen64plus-next-EnableLegacyBlending = "True"\n' +
       'mupen64plus-HybridFilter = "False"\n' +
+      // WRC - forced down from the core's own default (8000) while
+      // investigating an Xbox out-of-memory report. GLideN64's cache
+      // properly frees the GL texture object on eviction (Textures.cpp's
+      // _checkCacheSize()), so this isn't a leak fix - it just caps how
+      // many live cached textures can exist at once, at the smallest
+      // built-in preset.
+      // 'mupen64plus-MaxTxCacheSize = "1500"\n' +
       (gameSettings.fbEmulation === false ? 'mupen64plus-EnableFBEmulation = "False"\n' : '') +
       (gameSettings.nativeResFactor ? `mupen64plus-EnableNativeResFactor = "${gameSettings.nativeResFactor}"\n` : '') +
       (countPerOp >= 1 ? `mupen64plus-CountPerOp = "${countPerOp}"\n` : '')
@@ -347,14 +364,46 @@ export class Emulator extends RetroAppWrapper {
     }
   }
 
+  // WRC (2026-09-12): all three explicit per docs/escape-hack-audit.md's
+  // decision rule - N64's Z button is real and commonly held for
+  // extended periods (mapped to both LTRIG and RTRIG in pollControls()),
+  // so BOTH the LT+LA (Escape) and RT+RA (Start) combos need hold-timer
+  // protection: a long real Z hold could otherwise coincide with an
+  // incidental LANALOG or RANALOG click (real N64 hardware has no
+  // clickable stick, but the right stick IS in real, active use for
+  // C-buttons via tilt - see pollControls() - and intense Z-heavy
+  // moments make an accidental click more likely, not less, regardless
+  // of whether the click itself is bound to anything). No real Select
+  // button exists on N64, so isSelectEscapeHackEnabled stays false -
+  // there's nothing to protect.
   isEscapeHackEnabled() {
+    return true;
+  }
+
+  isStartEscapeHackEnabled() {
+    return true;
+  }
+
+  isSelectEscapeHackEnabled() {
     return false;
+  }
+
+  // Base class default pauses on any tap anywhere on screen -- redundant
+  // (and disruptive) now that there's a dedicated Pause button in the
+  // touch overlay. Same override every other TouchOverlay app uses for
+  // the same reason.
+  createTouchListener() {}
+
+  // Touch/mouse/keyboard interaction detection + on-screen touch overlay
+  // gating is inherited from BasicRetroAppWrapper.
+  onFrame() {
+    super.onFrame();
   }
 
   applyGameSettings() {}
 
   isForceAspectRatio() {
-    return false;
+    return true;
   }
 
   getUseNewResizeStyle() {
@@ -393,8 +442,17 @@ export class Emulator extends RetroAppWrapper {
 
     controllers.poll();
 
+    // WRC (2026-09-12): this app used to track escapeCount (LTRIG/
+    // LANALOG/RANALOG hold-time) but never actually consulted
+    // isEscapeHackEnabled() in the CIDS.ESCAPE check below, so the
+    // override was dead code and the hold-timer ran unconditionally
+    // regardless of what it said. Now properly wired to all three
+    // isXEscapeHackEnabled() getters (see those for the reasoning) -
+    // both Escape and Start need protection here, so all four buttons
+    // are watched.
     if (
       controllers.isControlDown(0, CIDS.LTRIG) ||
+      controllers.isControlDown(0, CIDS.RTRIG) ||
       controllers.isControlDown(0, CIDS.LANALOG) ||
       controllers.isControlDown(0, CIDS.RANALOG)
     ) {
@@ -408,11 +466,12 @@ export class Emulator extends RetroAppWrapper {
       let axisX = 0;
       let axisY = 0;
 
+      const escapeHackOk = (this.escapeCount === -1 || this.escapeCount < 60);
+      const escapeOk = !this.isEscapeHackEnabled() || escapeHackOk;
+      const startOk = !this.isStartEscapeHackEnabled() || escapeHackOk;
+
       // Hack to reduce likelihood of accidentally bringing up menu
-      if (
-        controllers.isControlDown(0 /*i*/, CIDS.ESCAPE) &&
-        (this.escapeCount === -1 || this.escapeCount < 60)
-      ) {
+      if (controllers.isControlDown(0 /*i*/, CIDS.ESCAPE) && escapeOk) {
         if (this.pause(true)) {
           controllers
             .waitUntilControlReleased(0 /*i*/, CIDS.ESCAPE)
@@ -430,7 +489,7 @@ export class Emulator extends RetroAppWrapper {
       } else if (controllers.isControlDown(i, CIDS.LEFT, false)) {
         input |= LEFT;
       }
-      if (controllers.isControlDown(i, CIDS.START)) {
+      if (controllers.isControlDown(i, CIDS.START) && startOk) {
         input |= START;
       }
       if (controllers.isControlDown(i, CIDS.A)) {

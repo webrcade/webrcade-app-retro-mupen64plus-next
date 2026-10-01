@@ -197,6 +197,7 @@ export class EmulatorPauseScreen extends Component {
           <N64SettingsEditor
             emulator={emulator}
             onClose={closeCallback}
+            showOnScreenControls={true}
           />
         ) : null}
         {mode === ModeEnum.CHEATS ? (
