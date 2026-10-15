@@ -4,7 +4,7 @@
 
 The Nintendo 64 (N64) application for [webЯcade](https://www.webrcade.com) is an emulator for the [Nintendo 64 game console](https://en.wikipedia.org/wiki/Nintendo_64).
 
-The underlying emulator is [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx), a libretro core, compiled to WebAssembly and run through webЯcade's shared RetroArch-based engine.
+The underlying emulator is [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx), a libretro core.
 
 <p align="center">
  <a href="https://play.webrcade.com">
