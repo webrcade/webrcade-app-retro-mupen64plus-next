@@ -6,9 +6,17 @@ The Nintendo 64 (N64) application for [webЯcade](https://www.webrcade.com) is a
 
 The underlying emulator is [Mupen64Plus-Next](https://github.com/libretro/mupen64plus-libretro-nx), a libretro core, compiled to WebAssembly and run through webЯcade's shared RetroArch-based engine.
 
+<p align="center">
+ <a href="https://play.webrcade.com">
+  <img src="https://docs.webrcade.com/assets/images/apps/n64.png" width="90%">
+ </a>
+ <br>
+ <i>Dexanoid R1 by Protest Design</i>
+</p>
+
 ## Documentation
 
-The [Nintendo 64 Application Documentation](https://docs.webrcade.com/apps/emulators/n64/) includes [keyboard](https://docs.webrcade.com/apps/emulators/n64/#keyboard) and [gamepad](https://docs.webrcade.com/apps/emulators/n64/#gamepad) control mappings, information related to local and cloud-based storage support, and details regarding the use of the emulator within a [webЯcade feed](https://docs.webrcade.com/apps/emulators/n64/#feed).
+The [Nintendo 64 Application Documentation](https://docs.webrcade.com/apps/emulators/n64/) includes [keyboard](https://docs.webrcade.com/apps/emulators/n64/#keyboard) and [gamepad](https://docs.webrcade.com/apps/emulators/n64/#gamepad) control mappings, information related to [SRAM, EEPROM, Flash, and Controller Pak](https://docs.webrcade.com/apps/emulators/n64/#sram-eeprom-flash-and-controller-pak-storage) storage support, and details regarding the use of the emulator within a [webЯcade feed](https://docs.webrcade.com/apps/emulators/n64/#feed).
 
 ## LICENSE
 
